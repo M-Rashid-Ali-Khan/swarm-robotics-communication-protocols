@@ -1,6 +1,7 @@
 import random
 import math
 import matplotlib.pyplot as plt
+import time
 
 
 # -----------------------------
@@ -13,9 +14,11 @@ class Agent:
         self.y = y
         self.speed = speed
 
-        # target for random waypoint
         self.tx = random.uniform(0, 100)
         self.ty = random.uniform(0, 100)
+
+        self.inbox = []
+        self.buffer_limit = 10
 
     def distance_to_target(self):
         return math.sqrt((self.tx - self.x) ** 2 + (self.ty - self.y) ** 2)
@@ -155,25 +158,81 @@ class SwarmSimulator:
             for n in neighbors:
                 self.forward_message(n, msg)
 
-    def forward_message(self, agent, msg):
-        if not hasattr(agent, "inbox"):
-            agent.inbox = []
+    def forward_message(self, sender, receiver, msg):
+        dx = sender.x - receiver.x
+        dy = sender.y - receiver.y
+        dist = math.sqrt(dx * dx + dy * dy)
 
-        # avoid duplicates
-        if msg["id"] in [m["id"] for m in agent.inbox]:
+        # LOSS MODEL
+        if not self.transmission_success(dist):
             return
 
-        agent.inbox.append(msg)
+        # BUFFER CHECK
+        if len(receiver.inbox) >= receiver.buffer_limit:
+            return
 
-        # simple TTL decay
-        msg = msg.copy()
-        msg["ttl"] -= 1
+        # DELAY SIMULATION (simple queue)
+        delayed_msg = self.copy_message(msg)
+        delayed_msg["arrival_time"] = time.time() + dist * 0.01
 
-        if msg["ttl"] > 0:
-            neighbors = self.get_neighbors(agent)
-            for n in neighbors:
-                if n.id != agent.id:
-                    self.forward_message(n, msg)
+        receiver.inbox.append(delayed_msg)
+
+    def process_inbox(self, agent):
+        current_time = time.time()
+
+        ready = []
+
+        for msg in agent.inbox:
+            if "arrival_time" in msg and msg["arrival_time"] <= current_time:
+                ready.append(msg)
+
+        for msg in ready:
+            agent.inbox.remove(msg)
+    
+    def communication_step(self):
+        # process delayed messages first
+        for a in self.agents:
+            self.process_inbox(a)
+
+        # generate new messages
+        for agent in self.agents:
+            if random.random() < 0.05:
+                msg = {
+                    "id": self.message_id,
+                    "sender": agent.id,
+                    "ttl": 5
+                }
+                self.message_id += 1
+
+                neighbors = self.get_neighbors(agent)
+
+                for n in neighbors:
+                    self.try_forward(agent, n, msg)
+    
+    def try_forward(self, sender, receiver, msg):
+        if msg["ttl"] <= 0:
+            return
+
+        msg2 = self.copy_message(msg)
+        msg2["ttl"] -= 1
+
+        self.forward_message(sender, receiver, msg2)
+
+    def copy_message(self, msg):
+        return {
+            "id": msg["id"],
+            "sender": msg["sender"],
+            "ttl": msg["ttl"]
+        }
+    
+    def transmission_success(self, distance):
+        # distance based loss + noise
+        base_loss = distance / self.comm_range
+        random_noise = random.uniform(0, 0.3)
+
+        probability = min(1.0, base_loss + random_noise)
+
+        return random.random() > probability
 
 # -----------------------------
 # Run
