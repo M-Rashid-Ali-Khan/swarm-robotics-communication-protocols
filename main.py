@@ -369,10 +369,18 @@ def run_experiment():
 
     swarm_sizes = [
         10,
+        20,
         30,
+        40,
         50,
+        60,
+        70,
+        80,
+        90,
         100
     ]
+
+    num_trials = 20
 
     results = []
 
@@ -381,22 +389,53 @@ def run_experiment():
         for size in swarm_sizes:
 
             print(
-                f"Running "
-                f"{protocol} "
-                f"with {size} agents"
+                f"\nRunning {protocol}"
+                f" with {size} agents"
             )
 
-            sim = SwarmSimulator(
-                num_agents=size,
-                steps=500,
-                protocol=protocol
-            )
+            delivery_sum = 0
+            latency_sum = 0
+            transmission_sum = 0
 
-            metrics = sim.simulate()
+            for trial in range(num_trials):
 
-            metrics["agents"] = size
+                print(
+                    f" Trial "
+                    f"{trial + 1}/{num_trials}"
+                )
 
-            results.append(metrics)
+                sim = SwarmSimulator(
+                    num_agents=size,
+                    steps=1000,
+                    protocol=protocol
+                )
+
+                metrics = sim.simulate()
+
+                delivery_sum += (
+                    metrics["delivery_ratio"]
+                )
+
+                latency_sum += (
+                    metrics["latency"]
+                )
+
+                transmission_sum += (
+                    metrics["transmissions"]
+                )
+
+            avg_metrics = {
+                "protocol": protocol,
+                "agents": size,
+                "delivery_ratio":
+                    delivery_sum / num_trials,
+                "latency":
+                    latency_sum / num_trials,
+                "transmissions":
+                    transmission_sum / num_trials
+            }
+
+            results.append(avg_metrics)
 
     return results
 
