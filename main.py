@@ -310,10 +310,150 @@ class SwarmSimulator:
         probability = min(1.0, base_loss + random_noise)
 
         return random.random() > probability
+    
+    def get_metrics(self):
+
+        delivery_ratio = 0
+        avg_latency = 0
+
+        if self.sent_packets > 0:
+            delivery_ratio = (
+                self.received_packets /
+                self.sent_packets
+            )
+
+        if self.received_packets > 0:
+            avg_latency = (
+                self.total_latency /
+                self.received_packets
+            )
+
+        return {
+            "protocol": self.protocol,
+            "delivery_ratio": delivery_ratio,
+            "latency": avg_latency,
+            "transmissions": self.total_transmissions
+        }
+    
+    def reset_metrics(self):
+
+        self.sent_packets = 0
+        self.received_packets = 0
+        self.total_transmissions = 0
+        self.total_latency = 0
+        self.message_id = 0
+
+        for a in self.agents:
+            a.inbox.clear()
+            a.seen_messages.clear()
+
+    def simulate(self):
+
+        for _ in range(self.steps):
+
+            for a in self.agents:
+                a.move()
+
+            self.communication_step()
+
+        return self.get_metrics()
+
+
+def run_experiment():
+
+    protocols = [
+        "flooding",
+        "gossip",
+        "adaptive"
+    ]
+
+    swarm_sizes = [
+        10,
+        30,
+        50,
+        100
+    ]
+
+    results = []
+
+    for protocol in protocols:
+
+        for size in swarm_sizes:
+
+            print(
+                f"Running "
+                f"{protocol} "
+                f"with {size} agents"
+            )
+
+            sim = SwarmSimulator(
+                num_agents=size,
+                steps=500,
+                protocol=protocol
+            )
+
+            metrics = sim.simulate()
+
+            metrics["agents"] = size
+
+            results.append(metrics)
+
+    return results
+
+def plot_results(results):
+
+    protocols = [
+        "flooding",
+        "gossip",
+        "adaptive"
+    ]
+
+    metrics = [
+        "delivery_ratio",
+        "latency",
+        "transmissions"
+    ]
+
+    for metric in metrics:
+
+        plt.figure()
+
+        for protocol in protocols:
+
+            subset = [
+                r for r in results
+                if r["protocol"] == protocol
+            ]
+
+            x = [r["agents"] for r in subset]
+            y = [r[metric] for r in subset]
+
+            plt.plot(
+                x,
+                y,
+                marker="o",
+                label=protocol
+            )
+
+        plt.xlabel("Number of Agents")
+        plt.ylabel(metric)
+        plt.title(
+            f"{metric} vs Swarm Size"
+        )
+        plt.legend()
+        plt.grid(True)
+
 
 # -----------------------------
 # Run
 # -----------------------------
 if __name__ == "__main__":
-    sim = SwarmSimulator(num_agents=50, steps=200, protocol=ProtocolTypes.GOSSIP)
-    sim.animate()
+
+    results = run_experiment()
+
+    for r in results:
+        print(r)
+
+    plot_results(results)
+
+    plt.show()
