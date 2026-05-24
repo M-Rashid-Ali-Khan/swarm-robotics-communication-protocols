@@ -19,6 +19,7 @@ class Agent:
 
         self.inbox = []
         self.buffer_limit = 10
+        self.seen_messages = set()
 
     def distance_to_target(self):
         return math.sqrt((self.tx - self.x) ** 2 + (self.ty - self.y) ** 2)
@@ -40,12 +41,14 @@ class Agent:
         self.y += (dy / dist) * self.speed
 
 
-
+# "flooding"
+# "gossip"
+# "adaptive"
 # -----------------------------
 # Swarm Simulator
 # -----------------------------
 class SwarmSimulator:
-    def __init__(self, num_agents=50, steps=200):
+    def __init__(self, num_agents=50, steps=200, protocol="adaptive"):
         self.num_agents = num_agents
         self.steps = steps
         self.agents = []
@@ -53,6 +56,13 @@ class SwarmSimulator:
         self.comm_range = 15
         self.messages = []
         self.message_id = 0
+        self.protocol = protocol
+
+        # metrics
+        self.sent_packets = 0
+        self.received_packets = 0
+        self.total_transmissions = 0
+        self.total_latency = 0
         self.init_agents()
 
     def init_agents(self):
@@ -113,6 +123,20 @@ class SwarmSimulator:
             ax.set_xlim(0, 100)
             ax.set_ylim(0, 100)
             ax.set_title("Swarm Communication Links")
+            avg_latency = 0
+
+            if self.received_packets > 0:
+                avg_latency = (
+                    self.total_latency /
+                    self.received_packets
+                )
+
+            ax.set_title(
+                f"Protocol: {self.protocol} | "
+                f"Sent: {self.sent_packets} | "
+                f"Received: {self.received_packets} | "
+                f"Latency: {avg_latency:.3f}s"
+            )
 
             plt.pause(0.05)
 
@@ -141,22 +165,30 @@ class SwarmSimulator:
         }
     
     def communication_step(self):
-        new_messages = []
 
-        # each agent generates a message sometimes
+        # process existing delayed packets
+        for a in self.agents:
+            self.process_inbox(a)
+
+        # message generation
         for agent in self.agents:
-            if random.random() < 0.05:
-                msg = self.create_message(agent.id)
+
+            if random.random() < 0.03:
+
+                msg = {
+                    "id": self.message_id,
+                    "sender": agent.id,
+                    "ttl": 5,
+                    "created_time": time.time()
+                }
+
                 self.message_id += 1
-                new_messages.append((agent.id, msg))
+                self.sent_packets += 1
 
-        # propagate messages
-        for sender_id, msg in new_messages:
-            sender = self.agents[sender_id]
-            neighbors = self.get_neighbors(sender)
+                neighbors = self.get_neighbors(agent)
 
-            for n in neighbors:
-                self.forward_message(n, msg)
+                for n in neighbors:
+                    self.try_forward(agent, n, msg)
 
     def forward_message(self, sender, receiver, msg):
         dx = sender.x - receiver.x
@@ -180,15 +212,77 @@ class SwarmSimulator:
     def process_inbox(self, agent):
         current_time = time.time()
 
-        ready = []
+        ready_messages = []
 
         for msg in agent.inbox:
-            if "arrival_time" in msg and msg["arrival_time"] <= current_time:
-                ready.append(msg)
+            if msg["arrival_time"] <= current_time:
+                ready_messages.append(msg)
 
-        for msg in ready:
+        for msg in ready_messages:
             agent.inbox.remove(msg)
-    
+
+            # duplicate prevention
+            if msg["id"] in agent.seen_messages:
+                continue
+
+            agent.seen_messages.add(msg["id"])
+
+            self.received_packets += 1
+
+            latency = current_time - msg["created_time"]
+            self.total_latency += latency
+
+            # protocol forwarding
+            self.route_message(agent, msg)
+
+    def route_message(self, agent, msg):
+        if msg["ttl"] <= 0:
+            return
+
+        neighbors = self.get_neighbors(agent)
+
+        for neighbor in neighbors:
+
+            # prevent bounce back
+            if neighbor.id == msg["sender"]:
+                continue
+
+            forward = False
+
+            # --------------------------------
+            # FLOODING
+            # --------------------------------
+            if self.protocol == "flooding":
+                forward = True
+
+            # --------------------------------
+            # GOSSIP
+            # --------------------------------
+            elif self.protocol == "gossip":
+                if random.random() < 0.4:
+                    forward = True
+
+            # --------------------------------
+            # ADAPTIVE (your contribution)
+            # --------------------------------
+            elif self.protocol == "adaptive":
+
+                density = len(neighbors)
+
+                forwarding_probability = min(
+                    1.0,
+                    5 / (density + 1)
+                )
+
+                if random.random() < forwarding_probability:
+                    forward = True
+
+            if forward:
+                new_msg = self.copy_message(msg)
+                new_msg["ttl"] -= 1
+
+                self.try_forward(agent, neighbor, new_msg)
+
     def communication_step(self):
         # process delayed messages first
         for a in self.agents:
@@ -210,19 +304,20 @@ class SwarmSimulator:
                     self.try_forward(agent, n, msg)
     
     def try_forward(self, sender, receiver, msg):
+
         if msg["ttl"] <= 0:
             return
 
-        msg2 = self.copy_message(msg)
-        msg2["ttl"] -= 1
+        self.total_transmissions += 1
 
-        self.forward_message(sender, receiver, msg2)
+        self.forward_message(sender, receiver, msg)
 
     def copy_message(self, msg):
         return {
             "id": msg["id"],
             "sender": msg["sender"],
-            "ttl": msg["ttl"]
+            "ttl": msg["ttl"],
+            "created_time": msg["created_time"]
         }
     
     def transmission_success(self, distance):
