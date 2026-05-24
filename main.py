@@ -47,7 +47,9 @@ class SwarmSimulator:
         self.steps = steps
         self.agents = []
         self.history = []
-
+        self.comm_range = 15
+        self.messages = []
+        self.message_id = 0
         self.init_agents()
 
     def init_agents(self):
@@ -64,9 +66,7 @@ class SwarmSimulator:
         for a in self.agents:
             a.move()
 
-        # store snapshot
-        snapshot = [(a.x, a.y) for a in self.agents]
-        self.history.append(snapshot)
+        self.communication_step()
 
     def run(self):
         for _ in range(self.steps):
@@ -91,9 +91,17 @@ class SwarmSimulator:
         for _ in range(self.steps):
             ax.clear()
 
+            # move agents
             for a in self.agents:
                 a.move()
 
+            # draw links
+            for a in self.agents:
+                neighbors = self.get_neighbors(a)
+                for n in neighbors:
+                    ax.plot([a.x, n.x], [a.y, n.y], linewidth=0.5)
+
+            # draw nodes
             x = [a.x for a in self.agents]
             y = [a.y for a in self.agents]
 
@@ -101,13 +109,71 @@ class SwarmSimulator:
 
             ax.set_xlim(0, 100)
             ax.set_ylim(0, 100)
-            ax.set_title("Swarm Movement (Live)")
+            ax.set_title("Swarm Communication Links")
 
             plt.pause(0.05)
 
         plt.ioff()
         plt.show()
 
+    def get_neighbors(self, agent):
+        neighbors = []
+
+        for other in self.agents:
+            if other.id == agent.id:
+                continue
+
+            dist = math.sqrt((agent.x - other.x)**2 + (agent.y - other.y)**2)
+
+            if dist <= self.comm_range:
+                neighbors.append(other)
+
+        return neighbors
+    
+    def create_message(self, sender_id):
+        return {
+            "id": self.message_id,
+            "sender": sender_id,
+            "ttl": 5
+        }
+    
+    def communication_step(self):
+        new_messages = []
+
+        # each agent generates a message sometimes
+        for agent in self.agents:
+            if random.random() < 0.05:
+                msg = self.create_message(agent.id)
+                self.message_id += 1
+                new_messages.append((agent.id, msg))
+
+        # propagate messages
+        for sender_id, msg in new_messages:
+            sender = self.agents[sender_id]
+            neighbors = self.get_neighbors(sender)
+
+            for n in neighbors:
+                self.forward_message(n, msg)
+
+    def forward_message(self, agent, msg):
+        if not hasattr(agent, "inbox"):
+            agent.inbox = []
+
+        # avoid duplicates
+        if msg["id"] in [m["id"] for m in agent.inbox]:
+            return
+
+        agent.inbox.append(msg)
+
+        # simple TTL decay
+        msg = msg.copy()
+        msg["ttl"] -= 1
+
+        if msg["ttl"] > 0:
+            neighbors = self.get_neighbors(agent)
+            for n in neighbors:
+                if n.id != agent.id:
+                    self.forward_message(n, msg)
 
 # -----------------------------
 # Run
