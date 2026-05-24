@@ -40,20 +40,21 @@ class Agent:
         self.x += (dx / dist) * self.speed
         self.y += (dy / dist) * self.speed
 
+class ProtocolTypes:
+    FLOODING = "flooding"
+    GOSSIP = "gossip"
+    ADAPTIVE = "adaptive"
 
-# "flooding"
-# "gossip"
-# "adaptive"
 # -----------------------------
 # Swarm Simulator
 # -----------------------------
 class SwarmSimulator:
-    def __init__(self, num_agents=50, steps=200, protocol="adaptive"):
+    def __init__(self, num_agents=50, steps=200, protocol=ProtocolTypes.ADAPTIVE):
         self.num_agents = num_agents
         self.steps = steps
         self.agents = []
         self.history = []
-        self.comm_range = 15
+        self.comm_range = 25
         self.messages = []
         self.message_id = 0
         self.protocol = protocol
@@ -107,7 +108,7 @@ class SwarmSimulator:
             # move agents
             for a in self.agents:
                 a.move()
-
+            self.communication_step()
             # draw links
             for a in self.agents:
                 neighbors = self.get_neighbors(a)
@@ -283,25 +284,6 @@ class SwarmSimulator:
 
                 self.try_forward(agent, neighbor, new_msg)
 
-    def communication_step(self):
-        # process delayed messages first
-        for a in self.agents:
-            self.process_inbox(a)
-
-        # generate new messages
-        for agent in self.agents:
-            if random.random() < 0.05:
-                msg = {
-                    "id": self.message_id,
-                    "sender": agent.id,
-                    "ttl": 5
-                }
-                self.message_id += 1
-
-                neighbors = self.get_neighbors(agent)
-
-                for n in neighbors:
-                    self.try_forward(agent, n, msg)
     
     def try_forward(self, sender, receiver, msg):
 
@@ -333,5 +315,5 @@ class SwarmSimulator:
 # Run
 # -----------------------------
 if __name__ == "__main__":
-    sim = SwarmSimulator(num_agents=50, steps=200)
+    sim = SwarmSimulator(num_agents=50, steps=200, protocol=ProtocolTypes.GOSSIP)
     sim.animate()
