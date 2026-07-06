@@ -20,6 +20,8 @@ class Agent:
         self.inbox = []
         self.buffer_limit = 10
         self.seen_messages = set()
+        self.channel_load = 0
+        self.max_channel_capacity = 120
 
     def distance_to_target(self):
         return math.sqrt((self.tx - self.x) ** 2 + (self.ty - self.y) ** 2)
@@ -57,6 +59,7 @@ class SwarmSimulator:
         self.comm_range = 25
         self.messages = []
         self.message_id = 0
+        self.backoff_until = 0
         self.protocol = protocol
 
         # metrics
@@ -64,6 +67,17 @@ class SwarmSimulator:
         self.received_packets = 0
         self.total_transmissions = 0
         self.total_latency = 0
+        self.channel_busy_until = 0
+        self.channel_load = 0
+        
+        self.max_channel_capacity = 120
+        self.channel_busy = False
+
+        self.backoff_queue = []
+
+        self.slot_time = 0.01
+        self.cw_min = 1
+        self.cw_max = 16
         self.init_agents()
 
     def init_agents(self):
@@ -167,6 +181,20 @@ class SwarmSimulator:
     
     def communication_step(self):
 
+        self.channel_load = 0
+        now = time.time()
+
+        ready = []
+
+        for item in self.backoff_queue:
+            t, sender, receiver, msg = item
+            if t <= now:
+                ready.append(item)
+
+        for item in ready:
+            self.backoff_queue.remove(item)
+            _, sender, receiver, msg = item
+            self.forward_message(sender, receiver, msg)
         # process existing delayed packets
         for a in self.agents:
             self.process_inbox(a)
@@ -190,6 +218,13 @@ class SwarmSimulator:
 
                 for n in neighbors:
                     self.try_forward(agent, n, msg)
+        
+        if time.time() > self.channel_busy_until:
+            self.channel_busy = False
+
+    def collision_probability(self, receiver):
+        neighbors = self.get_neighbors(receiver)
+        return min(0.8, len(neighbors) * 0.02)
 
     def forward_message(self, sender, receiver, msg):
         dx = sender.x - receiver.x
@@ -200,11 +235,21 @@ class SwarmSimulator:
         if not self.transmission_success(dist):
             return
 
-        # BUFFER CHECK
-        if len(receiver.inbox) >= receiver.buffer_limit:
+        # NEW: CHANNEL LOSS
+        if not self.channel_success():
             return
 
-        # DELAY SIMULATION (simple queue)
+        # COLLISION MODEL
+        if random.random() < self.collision_probability(receiver):
+            return
+
+        # BUFFER CHECK (improved)
+        pressure = len(receiver.inbox) / receiver.buffer_limit
+        drop_prob = min(0.9, pressure * 0.8)
+
+        if random.random() < drop_prob:
+            return
+
         delayed_msg = self.copy_message(msg)
         delayed_msg["arrival_time"] = time.time() + dist * 0.01
 
@@ -256,6 +301,9 @@ class SwarmSimulator:
             if self.protocol == "flooding":
                 forward = True
 
+                if len(neighbors) > 5:
+                    forward = random.random() < 0.7
+
             # --------------------------------
             # GOSSIP
             # --------------------------------
@@ -290,9 +338,35 @@ class SwarmSimulator:
         if msg["ttl"] <= 0:
             return
 
+        self.channel_load += 1
         self.total_transmissions += 1
 
+        now = time.time()
+
+        # channel busy check
+        if now < self.channel_busy_until:
+
+            cw = random.randint(self.cw_min, self.cw_max)
+            backoff_time = cw * self.slot_time
+
+            self.backoff_queue.append(
+                (now + backoff_time, sender, receiver, msg)
+            )
+
+            return
+
+        # occupy channel
+        self.channel_busy = True
+        self.channel_busy_until = now + self.slot_time
+
         self.forward_message(sender, receiver, msg)
+
+    def channel_success(self):
+        if self.channel_load > self.max_channel_capacity:
+            return random.random() < 0.2
+
+        overload = self.channel_load / self.max_channel_capacity
+        return random.random() > overload * 0.3
 
     def copy_message(self, msg):
         return {
