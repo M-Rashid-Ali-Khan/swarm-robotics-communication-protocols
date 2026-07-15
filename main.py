@@ -493,13 +493,18 @@ def plot_results(results):
 # -----------------------------
 # Run
 # -----------------------------
-if __name__ == "__main__":
 
+def simulate_and_animate():
+    sim = SwarmSimulator(num_agents=50, steps=200, protocol=ProtocolTypes.GOSSIP)
+    sim.animate()
+
+def plot_experiment():
     results = run_experiment()
-
     for r in results:
         print(r)
-
     plot_results(results)
-
     plt.show()
+
+if __name__ == "__main__":
+
+    plot_experiment()
