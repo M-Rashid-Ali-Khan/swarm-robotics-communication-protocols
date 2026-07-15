@@ -58,6 +58,8 @@ class SwarmSimulator:
         self.messages = []
         self.message_id = 0
         self.protocol = protocol
+        self.current_step = 0
+        self.propagation_speed = 10.0
 
         # metrics
         self.sent_packets = 0
@@ -82,6 +84,8 @@ class SwarmSimulator:
 
         self.communication_step()
 
+        self.current_step += 1
+
     def run(self):
         for _ in range(self.steps):
             self.step()
@@ -105,10 +109,7 @@ class SwarmSimulator:
         for _ in range(self.steps):
             ax.clear()
 
-            # move agents
-            for a in self.agents:
-                a.move()
-            self.communication_step()
+            self.step()
             # draw links
             for a in self.agents:
                 neighbors = self.get_neighbors(a)
@@ -180,7 +181,7 @@ class SwarmSimulator:
                     "id": self.message_id,
                     "sender": agent.id,
                     "ttl": 5,
-                    "created_time": time.time()
+                    "created_step": self.current_step
                 }
 
                 self.message_id += 1
@@ -204,19 +205,25 @@ class SwarmSimulator:
         if len(receiver.inbox) >= receiver.buffer_limit:
             return
 
-        # DELAY SIMULATION (simple queue)
         delayed_msg = self.copy_message(msg)
-        delayed_msg["arrival_time"] = time.time() + dist * 0.01
 
+        delay_steps = max(
+            1,
+            math.ceil(dist / self.propagation_speed)
+        )
+
+        delayed_msg["arrival_step"] = (
+            self.current_step + delay_steps
+        )
         receiver.inbox.append(delayed_msg)
 
     def process_inbox(self, agent):
-        current_time = time.time()
+        current_step = self.current_step
 
         ready_messages = []
 
         for msg in agent.inbox:
-            if msg["arrival_time"] <= current_time:
+            if msg["arrival_step"] <= current_step:
                 ready_messages.append(msg)
 
         for msg in ready_messages:
@@ -230,7 +237,7 @@ class SwarmSimulator:
 
             self.received_packets += 1
 
-            latency = current_time - msg["created_time"]
+            latency = current_step - msg["created_step"]
             self.total_latency += latency
 
             # protocol forwarding
@@ -299,7 +306,7 @@ class SwarmSimulator:
             "id": msg["id"],
             "sender": msg["sender"],
             "ttl": msg["ttl"],
-            "created_time": msg["created_time"]
+            "created_step": msg["created_step"]
         }
     
     def transmission_success(self, distance):
