@@ -1,3 +1,278 @@
+"""
+=====================================================================
+Adaptive Swarm Communication Simulator
+=====================================================================
+
+Author:
+    Muhammad Rashid Ali Khan
+
+Description
+-----------
+This project simulates communication within a decentralized swarm of
+mobile robots operating in a wireless ad hoc network.
+
+Unlike traditional computer networks where devices communicate through
+fixed infrastructure, every robot in the swarm performs two roles
+simultaneously:
+
+    1. Information Producer
+       Generates new packets representing sensor observations,
+       navigation updates, obstacle detections, battery status,
+       or other information that should be shared.
+
+    2. Router
+       Receives packets from neighbouring robots and decides whether
+       those packets should be forwarded farther into the swarm.
+
+The simulator compares several communication strategies to study how
+efficiently information spreads as swarm size increases.
+
+The implemented routing protocols are:
+
+    • Flooding
+    • Gossip Routing
+    • Density Adaptive Routing
+
+The objective is to evaluate the tradeoff between
+
+    • Delivery Ratio
+    • Communication Latency
+    • Network Overhead
+
+=====================================================================
+Simulation Philosophy
+=====================================================================
+
+This is a discrete event simulator.
+
+The simulator DOES NOT use real wall clock time.
+
+Instead, time advances in fixed simulation steps.
+
+Every iteration represents one communication cycle for the entire swarm.
+
+Simulation Step
+
+    Step k
+
+        ↓
+
+    Move Robots
+
+        ↓
+
+    Process Arriving Packets
+
+        ↓
+
+    Generate New Messages
+
+        ↓
+
+    Route / Forward Messages
+
+        ↓
+
+    Schedule Future Deliveries
+
+        ↓
+
+    Advance to Step k + 1
+
+Using discrete simulation time makes experiments deterministic,
+repeatable and independent of computer performance.
+
+=====================================================================
+Communication Model
+=====================================================================
+
+Communication is based on information dissemination rather than
+point to point messaging.
+
+Example
+
+Robot A discovers an obstacle.
+
+Instead of sending the information to one destination, Robot A
+broadcasts the packet to every neighbouring robot.
+
+Those neighbours may rebroadcast the packet to their neighbours,
+allowing information to spread across the entire swarm.
+
+This communication model is commonly used in
+
+    • Robot swarms
+    • Wireless Sensor Networks
+    • Mobile Ad Hoc Networks (MANETs)
+
+=====================================================================
+Packet Lifecycle
+=====================================================================
+
+Every packet follows the same sequence.
+
+    Robot generates information
+
+            ↓
+
+    Packet created
+
+            ↓
+
+    Nearby neighbours receive packet
+
+            ↓
+
+    Each neighbour decides whether to forward
+
+            ↓
+
+    Packet scheduled to arrive after propagation delay
+
+            ↓
+
+    Receiving robot processes packet
+
+            ↓
+
+    Packet forwarded again (optional)
+
+            ↓
+
+    TTL reaches zero
+
+            ↓
+
+    Packet discarded
+
+=====================================================================
+Duplicate Prevention
+=====================================================================
+
+Broadcast communication naturally creates duplicate packets.
+
+Example
+
+            B
+           / \
+    A ----     ---- D
+           \ /
+            C
+
+Robot D may receive the same packet from both B and C.
+
+To prevent endless rebroadcasting, every robot stores the IDs of
+previously processed packets.
+
+If the same packet arrives again, it is discarded.
+
+=====================================================================
+Time To Live (TTL)
+=====================================================================
+
+Every packet carries a Time To Live (TTL) value.
+
+Every forwarding operation decreases the TTL.
+
+Example
+
+    TTL = 5
+
+        ↓
+
+    4
+
+        ↓
+
+    3
+
+        ↓
+
+    2
+
+        ↓
+
+    1
+
+        ↓
+
+    0
+
+Once TTL reaches zero the packet is discarded.
+
+This prevents packets from circulating forever.
+
+=====================================================================
+Wireless Channel Assumptions
+=====================================================================
+
+The current simulator models several simplified wireless effects.
+
+    • Finite communication range
+
+    • Distance dependent packet loss
+
+    • Finite receiver buffer
+
+    • Propagation delay proportional to distance
+
+Future versions may also include
+
+    • CSMA/CA
+
+    • Binary exponential backoff
+
+    • RTS / CTS
+
+    • TDMA scheduling
+
+    • Multi channel communication
+
+=====================================================================
+Performance Metrics
+=====================================================================
+
+The simulator measures
+
+Delivery Ratio
+
+    Successfully delivered packets
+    ------------------------------
+      Generated packets
+
+Average Latency
+
+    Average number of simulation steps required for a packet
+    to reach receiving robots.
+
+Transmission Count
+
+    Total forwarding operations performed by the swarm.
+
+These metrics allow communication protocols to be compared as the
+number of robots increases.
+
+=====================================================================
+Limitations
+=====================================================================
+
+This simulator is intended for communication algorithm evaluation,
+not physical layer accuracy.
+
+Many real world effects are intentionally simplified, including
+
+    • Radio propagation
+    • MAC protocol behaviour
+    • Wireless interference
+    • Hardware timing
+
+The design prioritizes clarity, extensibility and algorithm
+comparison over exact network emulation.
+
+=====================================================================
+"""
+
+
 import random
 import math
 import matplotlib.pyplot as plt
@@ -19,6 +294,15 @@ class Agent:
 
         self.inbox = []
         self.buffer_limit = 10
+        # Prevent forwarding duplicate packets.
+        #
+        # Broadcast protocols naturally create multiple copies
+        # of the same packet.
+        #
+        # Once a robot has processed a packet ID once,
+        # every future copy is discarded.
+        #
+        # This prevents infinite rebroadcast loops.
         self.seen_messages = set()
 
     def distance_to_target(self):
@@ -49,6 +333,26 @@ class ProtocolTypes:
 # Swarm Simulator
 # -----------------------------
 class SwarmSimulator:
+    """
+    Discrete event simulator for swarm communication.
+
+    Every robot in the swarm plays two roles:
+
+    1. Information Producer
+       Robots occasionally generate new packets
+       representing sensor measurements, navigation
+       updates or discovered events.
+
+    2. Router
+       Robots forward packets received from neighbouring
+       robots so information can propagate throughout
+       the swarm.
+
+    The simulator advances one discrete communication
+    step at a time rather than using real wall clock
+    time. This makes experiments deterministic and
+    reproducible.
+    """
     def __init__(self, num_agents=50, steps=200, protocol=ProtocolTypes.ADAPTIVE):
         self.num_agents = num_agents
         self.steps = steps
@@ -59,6 +363,15 @@ class SwarmSimulator:
         self.message_id = 0
         self.protocol = protocol
         self.current_step = 0
+        # Virtual propagation speed.
+        # Used to convert communication distance into
+        # transmission delay measured in simulation steps.
+        #
+        # Example:
+        # Distance = 25 units
+        # Speed = 10 units/step
+        #
+        # Packet arrives after ceil(25/10)=3 steps.
         self.propagation_speed = 10.0
 
         # metrics
@@ -78,13 +391,19 @@ class SwarmSimulator:
             )
             self.agents.append(a)
 
-    def step(self):
-        for a in self.agents:
-            a.move()
+def step(self):
 
-        self.communication_step()
+    # Move every robot toward its current destination.
+    # Robot movement changes the communication topology,
+    # meaning neighbours may appear or disappear every step.
+    for a in self.agents:
+        a.move()
 
-        self.current_step += 1
+    # Simulate one complete communication cycle.
+    self.communication_step()
+
+    # Advance simulation clock.
+    self.current_step += 1
 
     def run(self):
         for _ in range(self.steps):
@@ -146,6 +465,12 @@ class SwarmSimulator:
         plt.show()
 
     def get_neighbors(self, agent):
+        """
+        Discover all robots inside wireless communication range.
+        The neighbour list represents every robot that can
+        directly exchange packets with this robot during the
+        current simulation step.
+        """
         neighbors = []
 
         for other in self.agents:
@@ -167,6 +492,26 @@ class SwarmSimulator:
         }
     
     def communication_step(self):
+        """
+        Executes one communication cycle.
+
+        Every simulation step performs two independent tasks.
+
+        1. Process packets that have arrived this step.
+        These packets may be forwarded to neighbouring robots.
+
+        2. Generate new packets.
+        Every robot has a small probability of creating
+        brand new information (sensor update, obstacle,
+        position estimate, etc.).
+
+        Therefore each robot acts simultaneously as
+
+            • a packet producer
+            • a packet forwarder
+
+        exactly as in many distributed swarm systems.
+        """
 
         # process existing delayed packets
         for a in self.agents:
@@ -193,6 +538,19 @@ class SwarmSimulator:
                     self.try_forward(agent, n, msg)
 
     def forward_message(self, sender, receiver, msg):
+        """
+        Attempts to transmit one packet from sender to receiver.
+
+        Successful delivery depends on
+
+        • wireless distance
+        • packet loss model
+        • receiver buffer capacity
+
+        If transmission succeeds, the packet is scheduled to
+        arrive several simulation steps later according to
+        its propagation delay.
+        """
         dx = sender.x - receiver.x
         dy = sender.y - receiver.y
         dist = math.sqrt(dx * dx + dy * dy)
@@ -218,6 +576,16 @@ class SwarmSimulator:
         receiver.inbox.append(delayed_msg)
 
     def process_inbox(self, agent):
+        """
+        Deliver every packet whose arrival time has been reached.
+
+        Packets remain inside the receiver's inbox until their
+        scheduled arrival step.
+
+        Once delivered, the robot decides whether the packet
+        should be forwarded according to the selected routing
+        protocol.
+        """
         current_step = self.current_step
 
         ready_messages = []
@@ -244,6 +612,23 @@ class SwarmSimulator:
             self.route_message(agent, msg)
 
     def route_message(self, agent, msg):
+        """
+        Routing decision.
+
+        The simulator models information dissemination rather
+        than point to point communication.
+
+        Each received packet represents information that may
+        still need to reach robots farther away.
+
+        Therefore a robot decides whether to rebroadcast the
+        packet to all neighbouring robots.
+
+        Forwarding stops when
+
+        • TTL reaches zero
+        • protocol decides not to forward
+        """
         if msg["ttl"] <= 0:
             return
 
@@ -258,20 +643,54 @@ class SwarmSimulator:
             forward = False
 
             # --------------------------------
-            # FLOODING
+            # FLOODING:
+            #
+            # Forward every received packet to every neighbour.
+            #
+            # Advantages
+            # ----------
+            # Maximum coverage.
+            #
+            # Disadvantages
+            # -------------
+            # Heavy network traffic.
+            # Broadcast storm in large swarms.
+            #  
             # --------------------------------
             if self.protocol == "flooding":
                 forward = True
 
             # --------------------------------
             # GOSSIP
+            # 
+            # Advantages
+            # ----------
+            # Forward only with a fixed probability.
+            #
+            # Disadvantages
+            # -------------
+            # Reduces communication overhead but may leave
+            # parts of the swarm uninformed.
+            #
             # --------------------------------
             elif self.protocol == "gossip":
                 if random.random() < 0.4:
                     forward = True
 
             # --------------------------------
-            # ADAPTIVE (your contribution)
+            # ADAPTIVE
+            # Density adaptive routing.
+            #
+            # Robots in sparse regions forward more often.
+            #
+            # Robots surrounded by many neighbours forward
+            # less frequently because nearby robots are
+            # already likely to retransmit the packet.
+            #
+            # Goal:
+            # Reduce redundant transmissions while maintaining
+            # good network coverage.
+            #
             # --------------------------------
             elif self.protocol == "adaptive":
 
@@ -310,6 +729,15 @@ class SwarmSimulator:
         }
     
     def transmission_success(self, distance):
+        """
+        Simple wireless channel model.
+
+        Packet loss increases with transmission distance.
+
+        Long links are less reliable than short links,
+        approximating the behaviour of real wireless
+        communication systems.
+        """
         # distance based loss + noise
         base_loss = distance / self.comm_range
         random_noise = random.uniform(0, 0.3)
